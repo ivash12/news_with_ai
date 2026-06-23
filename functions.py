@@ -1,12 +1,14 @@
+import google
 from google import genai
 import requests
 import trafilatura
 from dotenv import load_dotenv
 import os
 
+load_dotenv()
+
 #returns the news and articles' links from CURRENTS_API
 def get_the_news(category):
-    load_dotenv()
     currents_api_key = os.getenv("CURRENTS_API_KEY")
     response = requests.get(
         "https://api.currentsapi.services/v1/latest-news",
@@ -34,15 +36,20 @@ def get_the_news(category):
 
 #returns summary of the articles
 def return_summary(category, texts_list):
-    client = genai.Client()
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
-        contents=(f"You are a news analyst. Based on the following {category} news articles, "
-                  "write a 3-4 sentence overview that identifies the 2-3 dominant themes "
-                  "across these articles. Do not mention each article individually. "
-                  "Synthesize the key themes into one coherent paragraph, "
-                  "do not list articles one by one. Do not start with 'Currently' or 'Recently'. "
-                  "Ignore any garbled or unreadable text. "
-                  f"Articles: {texts_list}"))
-    return response.text
+    key = os.getenv("GEMINI_API_KEY")
+    client = genai.Client(api_key=key)
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=(f"You are a news analyst. Based on the following {category} news articles, "
+                      "write a 3-4 sentence overview that identifies the 2-3 dominant themes "
+                      "across these articles. Do not mention each article individually. "
+                      "Synthesize the key themes into one coherent paragraph, "
+                      "do not list articles one by one. Do not start with 'Currently' or 'Recently'. "
+                      "Ignore any garbled or unreadable text. "
+                      f"Articles: {texts_list}"))
+        return response.text
+    except google.genai.errors.ServerError:
+        return "The AI model is busy now. Please, try again later."
+
 

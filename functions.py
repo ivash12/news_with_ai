@@ -4,7 +4,10 @@ import requests
 import trafilatura
 from dotenv import load_dotenv
 import os
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
 
+nltk.download("vader_lexicon")
 load_dotenv()
 
 #returns the news and articles' links from CURRENTS_API
@@ -51,5 +54,17 @@ def return_summary(category, texts_list):
         return response.text
     except google.genai.errors.ServerError:
         return "The AI model is busy now. Please, try again later."
+
+# sentiment analysis
+def get_sentiment(text):
+    sia = SentimentIntensityAnalyzer()
+    score = sia.polarity_scores(text)["compound"]
+    if score >= 0.05:
+        return "Positive"
+    elif score <= -0.05:
+        return "Negative"
+    else:
+        return "Neutral"
+
 
 

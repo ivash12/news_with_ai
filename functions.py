@@ -10,19 +10,38 @@ from nltk.sentiment import SentimentIntensityAnalyzer
 nltk.download("vader_lexicon")
 load_dotenv()
 
-#returns the news and articles' links from CURRENTS_API
+#returns the news, articles' links and an error message (None if everything went fine) from CURRENTS_API
 def get_the_news(category):
     currents_api_key = os.getenv("CURRENTS_API_KEY")
-    response = requests.get(
-        "https://api.currentsapi.services/v1/latest-news",
-        params={
-            "apiKey": currents_api_key,
-            "category": category,
-            "language": "en",
-            "page_size": 10
-        }
-    )
-    response = response.json()["news"]
+    if not currents_api_key:
+        return {}, [], "CURRENTS_API_KEY is not set. Add it to your .env file."
+    try:
+        response = requests.get(
+            "https://api.currentsapi.services/v1/latest-news",
+            params={
+                "apiKey": currents_api_key,
+                "category": category,
+                "language": "en",
+                "page_size": 10
+            },
+            timeout=10
+        )
+    except requests.exceptions.Timeout:
+        return {}, [], "The news service took too long to respond. Please, try again later."
+    except requests.exceptions.RequestException:
+        # the exception text contains the request URL with the API key, so it is not shown
+        return {}, [], "Could not connect to the news service. Please, check your connection and try again."
+
+    if response.status_code != 200:
+        return {}, [], f"The news service returned an error (HTTP {response.status_code}). Please, try again later."
+    try:
+        data = response.json()
+    except ValueError:
+        return {}, [], "The news service returned an unreadable response. Please, try again later."
+    if not isinstance(data, dict) or "news" not in data:
+        return {}, [], "The news service returned an unexpected response. Please, try again later."
+
+    response = data["news"]
     url_list = []
     showed_links = []
     texts_list = {}
@@ -35,7 +54,7 @@ def get_the_news(category):
             texts_list[index] = (text)
             showed_links.append(i)
 
-    return texts_list, showed_links
+    return texts_list, showed_links, None
 
 #returns summary of the articles
 def return_summary(category, texts_list):

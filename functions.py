@@ -1,5 +1,5 @@
-import google
 from google import genai
+from google.genai import errors
 import requests
 import trafilatura
 from dotenv import load_dotenv
@@ -15,6 +15,10 @@ CACHE_TTL = 20 * 60
 
 
 class NewsError(Exception):
+    pass
+
+
+class SummaryError(Exception):
     pass
 
 
@@ -72,6 +76,8 @@ def get_the_news(category):
 def _generate_summary(category, articles):
     texts_list = [text for url, text in articles]
     key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        raise SummaryError("GEMINI_API_KEY is not set. Add it to your .env file.")
     client = genai.Client(api_key=key)
     response = client.models.generate_content(
         model="gemini-2.5-flash-lite",
@@ -82,14 +88,27 @@ def _generate_summary(category, articles):
                   "do not list articles one by one. Do not start with 'Currently' or 'Recently'. "
                   "Ignore any garbled or unreadable text. "
                   f"Articles: {texts_list}"))
+    if not response.text:
+        raise SummaryError("The AI model returned an empty response (it may have been blocked). Please, try again later.")
     return response.text
 
 
 def return_summary(category, articles):
     try:
-        return _generate_summary(category, articles)
-    except google.genai.errors.ServerError:
-        return "The AI model is busy now. Please, try again later."
+        return _generate_summary(category, articles), None
+    except SummaryError as e:
+        return None, str(e)
+    except errors.ServerError:
+        return None, "The AI model is busy now. Please, try again later."
+    except errors.ClientError as e:
+        if e.code == 429:
+            return None, "The AI service rate limit or quota has been reached. Please, try again later."
+        if e.code in (400, 401, 403):
+            return None, "The AI service rejected the request. Please, check that your GEMINI_API_KEY is valid."
+        return None, f"The AI service returned an error (HTTP {e.code}). Please, try again later."
+    except Exception:
+        return None, "Could not connect to the AI service. Please, check your connection and try again."
+
 
 def get_sentiment(text):
     sia = SentimentIntensityAnalyzer()
@@ -110,12 +129,12 @@ def render_category_page(category):
         if error:
             st.error(error)
         else:
-            summary = return_summary(category, articles)
-            if summary != "The AI model is busy now. Please, try again later.":
+            summary, error = return_summary(category, articles)
+            if error:
+                st.error(error)
+            else:
                 st.write(summary)
                 st.write("References and their sentiment:")
                 for url, text in articles:
                     sentiment = get_sentiment(text)
                     st.write(f"{sentiment}: {url}")
-            else:
-                st.write(summary)

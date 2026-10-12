@@ -49,31 +49,28 @@ def _fetch_news(category):
         raise NewsError("The news service returned an unexpected response. Please, try again later.")
 
     response = data["news"]
-    url_list = []
-    showed_links = []
-    texts_list = {}
+    articles = []
     for i in response:
-        url_list.append(i["url"])
-    for index, i in enumerate(url_list):
-        downloaded = trafilatura.fetch_url(i)
+        url = i["url"]
+        downloaded = trafilatura.fetch_url(url)
         text = trafilatura.extract(downloaded, output_format="txt")
         if text != None:
-            texts_list[index] = (text)
-            showed_links.append(i)
+            articles.append((url, text))
 
-    return texts_list, showed_links
+    return articles
 
 
 def get_the_news(category):
     try:
-        texts_list, showed_links = _fetch_news(category)
+        articles = _fetch_news(category)
     except NewsError as e:
-        return {}, [], str(e)
-    return texts_list, showed_links, None
+        return [], str(e)
+    return articles, None
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def _generate_summary(category, texts_list):
+def _generate_summary(category, articles):
+    texts_list = [text for url, text in articles]
     key = os.getenv("GEMINI_API_KEY")
     client = genai.Client(api_key=key)
     response = client.models.generate_content(
@@ -88,9 +85,9 @@ def _generate_summary(category, texts_list):
     return response.text
 
 
-def return_summary(category, texts_list):
+def return_summary(category, articles):
     try:
-        return _generate_summary(category, texts_list)
+        return _generate_summary(category, articles)
     except google.genai.errors.ServerError:
         return "The AI model is busy now. Please, try again later."
 
@@ -109,16 +106,15 @@ def render_category_page(category):
     st.title(f"{category.capitalize()} news summary")
 
     with st.spinner("Generating summary..."):
-        texts_list, showed_links, error = get_the_news(category)
+        articles, error = get_the_news(category)
         if error:
             st.error(error)
         else:
-            summary = return_summary(category, texts_list)
+            summary = return_summary(category, articles)
             if summary != "The AI model is busy now. Please, try again later.":
                 st.write(summary)
                 st.write("References and their sentiment:")
-                for index, url in enumerate(showed_links):
-                    text = texts_list.get(index, "")
+                for url, text in articles:
                     sentiment = get_sentiment(text)
                     st.write(f"{sentiment}: {url}")
             else:

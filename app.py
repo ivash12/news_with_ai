@@ -6,5 +6,4 @@ topics = ["Science", "Finance", "Business", "Technology", "Health", "Sport",  "P
 
 for topic in topics:
     if st.button(topic):
-        st.session_state["topic"] = topic
         st.switch_page(f"pages/{topic}.py")

@@ -61,6 +61,8 @@ def _fetch_news(category):
         if text != None:
             articles.append((url, text))
 
+    if not articles:
+        raise NewsError("Couldn't load any articles for this topic right now, try again later.")
     return articles
 
 

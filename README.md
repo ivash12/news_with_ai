@@ -21,7 +21,7 @@ A Streamlit web application that get the latest news across multiple categories 
 
 The app runs a simple linear pipeline that turns a topic click into a synthesized news briefing.
 
-**Frontend (Streamlit)** — The user picks a category on the home page. Streamlit handles routing between pages, and the selected category is passed through `st.session_state`.
+**Frontend (Streamlit)** — The user picks a category on the home page. Streamlit handles routing between pages, and each category page passes its own category to the shared page logic.
 
 **Getting the news (Currents API)** — The category triggers a request to Currents API, which returns the 10 latest articles with their metadata and URLs.
 
@@ -35,7 +35,7 @@ The app runs a simple linear pipeline that turns a topic click into a synthesize
 
 ### Prerequisites
 
-- Python 3.10 or higher
+- Python 3.11 or higher
 - A free Currents API key — https://currentsapi.services
 - A free Google Gemini API key — https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash-lite
 
@@ -51,16 +51,24 @@ cd news_with_ai
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-````
+```
 
 3. Install dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
+   To check the installed dependencies for known vulnerabilities, run [pip-audit](https://pypi.org/project/pip-audit/):
+```bash
+pip install pip-audit
+pip-audit -r requirements.txt
+```
+
 4. Create a `.env` file in the project root with your API keys
+```
 CURRENTS_API_KEY=your_currents_key_here
 GEMINI_API_KEY=your_gemini_key_here
+```
 
 5. Run the app
 ```bash

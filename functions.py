@@ -5,7 +5,11 @@ import trafilatura
 from dotenv import load_dotenv
 import os
 import re
-from urllib.parse import urlparse, quote
+import socket
+import time
+import ipaddress
+from concurrent.futures import ThreadPoolExecutor, wait
+from urllib.parse import urlparse, urljoin, quote
 import nltk
 import streamlit as st
 from nltk.sentiment import SentimentIntensityAnalyzer
@@ -14,6 +18,12 @@ nltk.download("vader_lexicon")
 load_dotenv()
 
 CACHE_TTL = 20 * 60
+ARTICLE_TIMEOUT = 8
+ARTICLE_WORKERS = 5
+MAX_REDIRECTS = 5
+MAX_ARTICLE_BYTES = 5 * 1024 * 1024
+ARTICLE_DEADLINE = 15
+FETCH_TOTAL_TIMEOUT = 20
 
 
 class NewsError(Exception):
@@ -29,6 +39,79 @@ def _is_http_url(url):
         return False
     parsed = urlparse(url)
     return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _is_public_host(hostname):
+    try:
+        addresses = socket.getaddrinfo(hostname, None)
+    except (socket.gaierror, UnicodeError):
+        return False
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0].split("%")[0])
+        if ip.version == 6 and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                or ip.is_multicast or ip.is_unspecified or not ip.is_global):
+            return False
+    return True
+
+
+def _is_safe_url(url):
+    if not _is_http_url(url):
+        return False
+    parsed = urlparse(url)
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port not in (None, 80, 443):
+        return False
+    return _is_public_host(parsed.hostname)
+
+
+def _read_limited(response, deadline):
+    # Give up if the body is bigger than MAX_ARTICLE_BYTES (so a huge response
+    # can't fill up the server's memory) or if it is still arriving after the
+    # deadline (so a server sending one byte at a time can't hang a thread).
+    # raw.read1() returns whatever has arrived so far instead of waiting for a
+    # full chunk, which is what lets the deadline check run regularly.
+    content_length = response.headers.get("Content-Length", "")
+    if content_length.isdigit() and int(content_length) > MAX_ARTICLE_BYTES:
+        return None
+    chunks = []
+    size = 0
+    while True:
+        if time.monotonic() > deadline:
+            return None
+        chunk = response.raw.read1(64 * 1024, decode_content=True)
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > MAX_ARTICLE_BYTES:
+            return None
+        chunks.append(chunk)
+
+
+def _fetch_article(url):
+    deadline = time.monotonic() + ARTICLE_DEADLINE
+    try:
+        for _ in range(MAX_REDIRECTS + 1):
+            if not _is_safe_url(url) or time.monotonic() > deadline:
+                return None
+            with requests.get(url, timeout=ARTICLE_TIMEOUT, allow_redirects=False, stream=True,
+                              headers={"User-Agent": "Mozilla/5.0"}) as response:
+                if response.is_redirect:
+                    url = urljoin(url, response.headers["Location"])
+                    continue
+                if response.status_code != 200:
+                    return None
+                content = _read_limited(response, deadline)
+            if content is None:
+                return None
+            return trafilatura.extract(content, output_format="txt")
+    except Exception:
+        return None
+    return None
 
 
 def _escape_markdown(text):
@@ -66,15 +149,19 @@ def _fetch_news(category):
         raise NewsError("The news service returned an unexpected response. Please, try again later.")
 
     response = data["news"]
+    urls = [i.get("url") for i in response if _is_http_url(i.get("url"))]
+    # Fetch articles in parallel, but never wait longer than FETCH_TOTAL_TIMEOUT
+    # in total: articles that aren't ready by then are skipped.
+    executor = ThreadPoolExecutor(max_workers=ARTICLE_WORKERS)
+    futures = [executor.submit(_fetch_article, url) for url in urls]
+    wait(futures, timeout=FETCH_TOTAL_TIMEOUT)
+    executor.shutdown(wait=False, cancel_futures=True)
     articles = []
-    for i in response:
-        url = i.get("url")
-        if not _is_http_url(url):
-            continue
-        downloaded = trafilatura.fetch_url(url)
-        text = trafilatura.extract(downloaded, output_format="txt")
-        if text != None:
-            articles.append((url, text))
+    for url, future in zip(urls, futures):
+        if future.done() and not future.cancelled():
+            text = future.result()
+            if text is not None:
+                articles.append((url, text))
 
     if not articles:
         raise NewsError("Couldn't load any articles for this topic right now, try again later.")

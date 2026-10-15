@@ -231,6 +231,7 @@ def get_sentiment(text):
 
 
 def render_category_page(category):
+    st.page_link("app.py", label="Back to topics", icon=":material/arrow_back:")
     st.title(f"{category.capitalize()} news summary")
 
     with st.spinner("Generating summary..."):
